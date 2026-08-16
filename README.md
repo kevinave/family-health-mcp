@@ -97,10 +97,9 @@ if missing:
     raise ValueError(...)          # -> "report is missing required sections: ..."
 ```
 
-The six sections: what was discussed, the user's own words, transcriptions of any documents shown,
-the advice given, self-measured values, and hand-over items for the local side. The one that
-carries the most weight is the verbatim one — because the paraphrase is where detail silently
-disappears.
+The six sections: `Summary`, `User's own words`, `Transcribed documents`, `Advice given`,
+`Self-measured values`, `Hand-over to the local side`. The one that carries the most weight is the
+verbatim one — because the paraphrase is where detail silently disappears.
 
 Every rule in this section is pinned by [`tests/`](tests/): the suite starts the real HTTP server
 over a throwaway archive and attacks it through the same three gates a client passes — wrong path,
@@ -167,8 +166,10 @@ Originals are never modified, so everything else can be rebuilt from them; the s
 a projection, not the source of truth, which makes a bad write recoverable rather than fatal. Files
 are named by report date, not filing date, so the timeline stays true when a document arrives late.
 
-<sub>Names are shown in English here; the reference deployment runs a Chinese archive, so the
-literal names in `server.py` are the Chinese equivalents.</sub>
+<sub>Directory names and section headings are part of the machine-checked contract, so the code
+ships them in English; `INBOX_DIRNAME` renames the write path for a localized archive (the
+reference deployment runs a Chinese one). Report *content* follows the language of the
+conversation.</sub>
 
 </details>
 
@@ -214,7 +215,8 @@ Generate one token per person with `secrets.token_hex(24)` and add it to `tokens
 `"<token>": {"member": "alice", "scope": "self"}`. Each member needs `members/<name>/` to exist
 before `save_report` will accept anything for them.
 
-Expose `127.0.0.1:8787` through a tunnel and add the URL as a developer-mode MCP connector:
+Expose the server through a tunnel (it binds `127.0.0.1:8787` by default; `HOST` and `PORT` are
+environment variables) and add the URL as a developer-mode MCP connector:
 `https://<your-host>/mcp-<path_token>`, auth = access token, scheme = bearer.
 `deploy/` has example launchd and cloudflared configuration.
 
