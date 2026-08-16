@@ -17,56 +17,22 @@ without ever handing the model write access to the archive itself.
 
 </div>
 
-<br/>
+---
 
-|  | |
-|---|---|
-| 🔒 | **Least privilege by construction** — three read-only tools, one write tool, no delete or rename anywhere |
-| 📐 | **Output contract enforced in code** — a malformed report fails the tool call, it is not merely discouraged in a prompt |
-| 👥 | **Multi-tenant** — one bearer token per person, scoped on *resolved* paths so `../` cannot walk out |
-| 🕳️ | **No inbound ports** — an outbound tunnel fronts a loopback-only server |
-| 📄 | **Plain files** — the archive is Markdown, JSON and CSV, and outlives whatever app reads it |
+## Why
 
-> [!NOTE]
-> The code comments and tool descriptions are in Chinese on purpose: they are not documentation,
-> they are the prompt the model reads at runtime, and the archive they describe is Chinese.
-> This README is the English documentation.
+The archive and a local agent already worked well together. The problem was everywhere else — at a
+clinic, on a phone, away from the machine holding the files. I could already reach it by SSH, so
+capability was never the issue; the issue was that every conversation had to *start* with
+connecting, and that small ritual is enough to make you skip it.
+
+So instead of a better way to reach the archive, put the archive inside the app that is already
+open. Which leaves one question worth answering carefully: **how much authority should a hosted
+model have over medical records?**
 
 ---
 
-## 💡 Why
-
-The archive and the local agent already worked, and I could already reach them from a phone —
-SSH in, talk to the CLI, done. Capability was never the problem.
-
-The problem was that every conversation had to *start* with connecting. That small ritual is
-enough to make you skip it, and a health note you don't write in the ten minutes after leaving a
-clinic doesn't get written at all.
-
-So rather than build a better way to reach the archive, put the archive **inside the app that is
-already open**. MCP turns that into a connector instead of a product.
-
-Which leaves one question worth answering carefully: how much authority should a hosted model have
-over medical records? Hence the split this project implements:
-
-<div align="center">
-
-### **the hosted model collects · the local side archives**
-
-</div>
-
-The remote end reads anything it is allowed to see, and deposits exactly one kind of thing — a
-structured report — into an inbox. Everything that changes the *shape* of the archive happens
-locally, on demand, under review.
-
-The server handles **text only**. Lab sheets and photos shared in the conversation are transcribed
-into the report in full — values, units, reference ranges — and the report flags which originals
-still need to be filed locally. Keeping binaries out of the transfer path removes a whole class of
-storage, format and permission problems, at the cost of one manual step.
-
----
-
-## 🏗️ Architecture
+## Architecture
 
 ```mermaid
 flowchart TB
@@ -102,78 +68,26 @@ flowchart TB
     style LOC fill:#e6f7ed,stroke:#2da44e
 ```
 
----
-
-## 📁 The archive
-
-The whole system rests on one design choice: **the archive is a directory, not a database.**
-Every layer above it — this server, the local agent, whatever replaces them in five years — is
-replaceable, because none of them owns the data.
-
-```
-health-archive/
-│
-├── docs/                        shared rules and operating procedures
-│   └── rules.md                 the single authority on how records are written
-│
-└── members/<name>/
-    │
-    ├── allergies-medication.md  safety-critical — read before any advice
-    ├── history.md               entries tagged active / resolved / ruled-out
-    ├── follow-ups.md            due dates and questions for the next visit
-    ├── index.md                 timeline — the index into everything below
-    │
-    ├── originals/YYYY/          scans, PDFs, photos — never edited, never deleted
-    ├── notes/YYYY/              narrative notes derived from those originals
-    ├── measurements/*.csv       self-measurement series (blood pressure, weight, …)
-    │
-    └── inbox/                   📥 the only path this server can write to
-        └── filed/YYYY/          reports that have been reviewed and archived
-```
-
-<sub>Filenames are shown here in English. The reference deployment runs a Chinese archive, so the
-literal names in `server.py` are the Chinese equivalents.</sub>
-
-Three rules keep it durable:
-
-| | |
-|:--|:--|
-| **1. Originals are the root** | Scans and reports in `originals/` are never modified or deleted. Everything else can be rebuilt from them. |
-| **2. Structure is derived** | The JSON and Markdown are a projection of the originals, not the source of truth — so a bad write is recoverable, not fatal. |
-| **3. The intelligent layer is swappable** | All behaviour lives in plain-Markdown procedures under `docs/`. Nothing about the archive assumes *which* model or client is reading it. |
-
-Naming is by **report date**, not filing date (`YYYY-MM-DD_topic`), so the timeline stays true
-even when a document is filed months late.
+**The hosted model collects; the local side archives.** It reads what it is allowed to see and
+deposits exactly one kind of thing — a structured report — into an inbox. Everything that changes
+the *shape* of the archive happens locally, under review.
 
 ---
 
-## 🧰 The tool surface
-
-The tool surface **is** the security boundary, so it is kept deliberately small.
+## The tool surface is the security boundary
 
 | Tool | Access | What it can do |
 |:--|:--:|:--|
 | `list_dir` | 🟢 read | List a directory inside the archive |
 | `read_file` | 🟢 read | Read one text file; binaries return metadata only |
-| `search` | 🟢 read | Full-text search across `.md` `.json` `.csv` `.txt` |
+| `search` | 🟢 read | Full-text search across the archive |
 | `save_report` | 🟡 write | Create **one new file** in the caller's own inbox |
 
-No delete. No rename. No move. No tool that writes to the structured record — history, medication
-lists, timelines and measurement series are all unreachable from the remote end. `save_report`
-never overwrites: a same-day, same-topic report gets a numeric suffix.
+No delete, no rename, no move, and nothing that writes to the structured record — history,
+medication lists and measurement series are unreachable from the remote end.
 
-> [!TIP]
-> The remote model once proposed five additional tools for itself. All five were declined — each
-> one moved a decision from the reviewed local side to the unreviewed remote side.
-
----
-
-## 📐 Design decisions
-
-### 1 · The output contract is enforced by the server, not requested in the prompt
-
-`save_report` rejects any report missing one of six required sections. Not "please include these
-sections" in an instruction the model may drift away from — a validation that **fails the call**:
+And the report contract is **enforced in code, not requested in the prompt**. A report missing any
+of its six required sections fails the tool call:
 
 ```python
 missing = [s for s in REPORT_SECTIONS if s not in content]
@@ -181,21 +95,25 @@ if missing:
     raise ValueError(...)          # -> "report is missing required sections: ..."
 ```
 
-<div align="center">
+The section that carries the most weight asks for the user's own words, verbatim — because the
+paraphrase is where detail silently disappears.
 
-`topic summary` · `the user's own words, verbatim` · `full transcription of files`
-`advice given` · `self-measured values` · `handover items`
+> [!TIP]
+> The remote model once proposed five additional tools for itself. All five were declined: each one
+> moved a decision from the reviewed local side to the unreviewed remote side.
 
-</div>
+---
 
-The second one carries the most weight: the model must preserve **what the user actually said**,
-not its own paraphrase — because the paraphrase is where detail silently disappears.
+<details>
+<summary><b>Security model</b></summary>
 
-### 2 · Scoping is checked on resolved paths
+<br/>
 
-Each bearer token maps to `{member, scope}`. A `self` token reaches only its own member directory
-plus shared documents; `all` is unrestricted. The check runs on the *resolved* path, so `../`
-cannot escape:
+Three independent layers, all of which must pass:
+
+1. **A long random path** — the endpoint is mounted at `/mcp-<path_token>`, and the URL alone is unguessable.
+2. **A bearer token** — compared with `hmac.compare_digest`, resolving to an identity attached to the request.
+3. **A small, read-biased tool surface** — plus scope checks on *resolved* paths, so `../` cannot escape:
 
 ```python
 p = (ARCHIVE / rel).resolve()
@@ -203,45 +121,51 @@ if not p.is_relative_to(ARCHIVE):
     raise ValueError(...)          # -> "path escapes the archive"
 ```
 
-Adding a family member: create the directory, add a token line, restart. Revoking: delete the
-line, restart.
+Each bearer token maps to `{member, scope}`: a `self` token reaches only its own member directory,
+`all` is unrestricted. Adding someone is one line and a restart; revoking is deleting that line.
 
-### 3 · Predictable model mistakes are fixed in code, not in the prompt
-
-The remote model has no memory across sessions, so every new conversation repeats the same
-mistakes. Asking it more nicely cannot work — it never saw the previous conversation. **Repeated,
-predictable friction belongs in the server.**
-
-Concretely: the model kept writing `alice/history.md` instead of `members/alice/history.md`.
-Rather than adding another line to the prompt, read paths now self-correct — if `<path>` does not
-exist but `members/<path>` does, the latter is used.
-
----
-
-## 🔐 Security model
-
-Three independent layers, all of which must pass:
-
-```
-①  a long random path      →  the endpoint URL alone is unguessable
-②  a bearer token          →  hmac.compare_digest, resolves to an identity
-③  a small tool surface    →  read-biased, plus resolved-path scope checks
-```
-
-The host exposes **no inbound ports** — the tunnel dials out. Path token and bearer token live in
+The host exposes no inbound ports — the tunnel dials out. Path token and bearer token live in
 separate files so either can be rotated alone.
 
-> [!WARNING]
-> **Known limitation.** Static bearer tokens are not part of the MCP authorization spec, which
-> expects OAuth. This works because the client accepts a static access token. If that changes,
-> this is the piece that has to be replaced.
+⚠️ **Known limitation.** Static bearer tokens are not part of the MCP authorization spec, which
+expects OAuth. This works because the client accepts a static access token; if that changes, this is
+the piece to replace.
 
----
-
-## 🚀 Setup
+</details>
 
 <details>
-<summary><b>Install and run</b></summary>
+<summary><b>The archive</b></summary>
+
+<br/>
+
+The whole system rests on one choice: **the archive is a directory, not a database.** Every layer
+above it is replaceable, because none of them owns the data.
+
+```
+health-archive/
+├── docs/                        shared rules and operating procedures
+└── members/<name>/
+    ├── allergies-medication.md  safety-critical — read before any advice
+    ├── history.md               entries tagged active / resolved / ruled-out
+    ├── follow-ups.md            due dates and questions for the next visit
+    ├── index.md                 timeline — the index into everything below
+    ├── originals/YYYY/          scans, PDFs, photos — never edited, never deleted
+    ├── notes/YYYY/              narrative notes derived from those originals
+    ├── measurements/*.csv       self-measurement series
+    └── inbox/                   📥 the only path this server can write to
+```
+
+Originals are never modified, so everything else can be rebuilt from them; the structured files are
+a projection, not the source of truth, which makes a bad write recoverable rather than fatal. Files
+are named by report date, not filing date, so the timeline stays true when a document arrives late.
+
+<sub>Names are shown in English here; the reference deployment runs a Chinese archive, so the
+literal names in `server.py` are the Chinese equivalents.</sub>
+
+</details>
+
+<details>
+<summary><b>Setup</b></summary>
 
 <br/>
 
@@ -259,90 +183,45 @@ set -a; source .env; set +a
 python3 server.py
 ```
 
-Generate one token per person:
+Generate one token per person with `secrets.token_hex(24)` and add it to `tokens.json` as
+`"<token>": {"member": "alice", "scope": "self"}`. Each member needs `members/<name>/` to exist
+before `save_report` will accept anything for them.
 
-```bash
-python3 -c "import secrets; print(secrets.token_hex(24))"
-```
-
-and add it to `tokens.json` as `"<token>": {"member": "alice", "scope": "self"}`.
-
-Each member needs `members/<name>/` to exist before `save_report` will accept anything for them.
+Expose `127.0.0.1:8787` through a tunnel and add the URL as a developer-mode MCP connector:
+`https://<your-host>/mcp-<path_token>`, auth = access token, scheme = bearer.
+`deploy/` has example launchd and cloudflared configuration.
 
 </details>
 
 <details>
-<summary><b>Connect the client</b></summary>
+<summary><b>Notes from operation</b></summary>
 
 <br/>
 
-Expose `127.0.0.1:8787` through a tunnel and add the resulting URL as a developer-mode MCP
-connector:
+**`read_file` deadlocked while `list_dir` and `search` looked fine.** The archive lives in a
+cloud-synced folder; under disk pressure the OS had evicted files to dataless placeholders, and
+reading one synchronously inside a single-threaded event loop deadlocked. What made it look like
+*one* broken tool was `search`'s own `except OSError: continue`, which swallowed the identical
+error. The fix belonged in the storage layer, not in the server.
 
-| Field | Value |
-|:--|:--|
-| URL | `https://<your-host>/mcp-<path_token>` |
-| Auth | access token / API key |
-| Scheme | bearer |
-| Token | from `tokens.json` |
-
-`deploy/` has example launchd and cloudflared configuration for running both as always-on services.
+**After renaming a tool, the unrenamed ones kept working.** Client-side tool lists are cached.
+Any change to the tool set now ends with: refresh the connector, then start a new conversation.
 
 </details>
 
 ---
 
-## 🔍 Notes from operation
+## Scope
 
-Two failures worth writing down, because in both the obvious diagnosis was wrong.
-
-<details>
-<summary><b><code>read_file</code> deadlocked while <code>list_dir</code> and <code>search</code> looked fine</b></summary>
-
-<br/>
-
-`read_file` returned `[Errno 11] Resource deadlock avoided`. The archive lives in a cloud-synced
-folder; under disk pressure the OS had evicted files to dataless placeholders, and reading one
-synchronously inside the server's single-threaded event loop triggered an in-process
-materialisation deadlock.
-
-What made it look like *one broken tool* was `search`'s own error handling — its
-`except (UnicodeDecodeError, OSError): continue` swallowed exactly the same error, so only
-`read_file` ever surfaced it.
-
-The fix went to the **storage layer** (pin the archive to local storage), not to a
-"force-download before reading" patch in the server. The server was not the thing that was wrong.
-
-</details>
-
-<details>
-<summary><b>After renaming a tool, unrenamed tools kept working — but the renamed one 404'd</b></summary>
-
-<br/>
-
-The client reported `Unknown tool` for the renamed tool while everything else behaved normally,
-which is a genuinely confusing signal. Client-side tool lists are cached and do not refresh on
-their own.
-
-Any change to the tool set now ends with: refresh the connector, then start a **new** conversation.
-
-</details>
-
----
-
-## 📋 Scope
-
-A personal system published as a reference implementation, not a product. It assumes a single
-trusted operator, a handful of users, and an archive that fits on one machine.
+A personal system published as a reference implementation, not a product. It assumes one trusted
+operator and an archive that fits on a single machine.
 
 > [!IMPORTANT]
-> **This is not medical software and it gives no medical advice.** The assistant's role in this
-> design is to record what was said and surface what is already in the archive.
-> Diagnosis is not one of its tools.
-
----
+> **Not medical software, and it gives no medical advice.** The assistant's role here is to record
+> what was said and surface what is already in the archive. Diagnosis is not one of its tools.
 
 <div align="center">
+<br/>
 
 MIT © [kevinave](https://github.com/kevinave)
 
