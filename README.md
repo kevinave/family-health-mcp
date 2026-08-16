@@ -344,6 +344,6 @@ trusted operator, a handful of users, and an archive that fits on one machine.
 
 <div align="center">
 
-MIT © [Shengping Huang](https://kevinave.com)
+MIT © [kevinave](https://github.com/kevinave)
 
 </div>
