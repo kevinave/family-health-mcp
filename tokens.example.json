@@ -1,0 +1,4 @@
+{
+  "REPLACE_WITH_secrets.token_hex(24)": { "member": "alice", "scope": "all" },
+  "REPLACE_WITH_ANOTHER_secrets.token_hex(24)": { "member": "bob", "scope": "self" }
+}

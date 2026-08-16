@@ -1,0 +1,15 @@
+# Secrets — never commit
+.env
+.path_token
+tokens.json
+*.pem
+
+# Runtime
+logs/
+*.log
+.venv/
+__pycache__/
+*.py[cod]
+
+# OS
+.DS_Store
