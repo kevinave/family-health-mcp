@@ -17,10 +17,13 @@ import json
 import os
 import re
 import sys
+from datetime import date as _date
 from pathlib import Path
 
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_request
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 BASE = Path(__file__).resolve().parent
 
@@ -248,10 +251,16 @@ def save_report(date: str, topic: str, content: str, member: str = "") -> str:
     _member_dir(m)
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
         raise ValueError("date 必须是 YYYY-MM-DD")
+    try:
+        _date.fromisoformat(date)
+    except ValueError:
+        raise ValueError(f"date 不是真实存在的日期: {date}")
     missing = [s for s in REPORT_SECTIONS if s not in content]
     if missing:
         raise ValueError(f"报告缺少必备章节: {'、'.join(missing)}。无内容的章节也要保留标题并写(无)")
-    topic = topic.strip().replace("/", "-").replace(" ", "_") or "对话"
+    # 清洗 topic:斜杠改连字符,所有空白(含换行,防 front matter 注入)折叠成下划线
+    topic = re.sub(r"[/\\]", "-", topic)
+    topic = re.sub(r"\s+", "_", topic.strip()) or "对话"
     rel = f"members/{m}/收件箱/{date}_{topic}.md"
     p = _resolve(rel)
     n = 2
@@ -265,22 +274,26 @@ def save_report(date: str, topic: str, content: str, member: str = "") -> str:
     return f"已存入 {rel},本地医生端会在定期整理时消化。"
 
 
-if __name__ == "__main__":
-    import uvicorn
-    from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.responses import JSONResponse
+class BearerAuthMiddleware(BaseHTTPMiddleware):
+    """第二层门禁:静态 Bearer 令牌,常量时间比较,把身份写进 request.state。"""
 
-    class BearerAuthMiddleware(BaseHTTPMiddleware):
-        """第二层门禁:静态 Bearer 令牌,常量时间比较,把身份写进 request.state。"""
+    async def dispatch(self, request, call_next):
+        supplied = request.headers.get("authorization", "")
+        for token, info in TOKENS.items():
+            if hmac.compare_digest(supplied, f"Bearer {token}"):
+                request.state.auth = info
+                return await call_next(request)
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
 
-        async def dispatch(self, request, call_next):
-            supplied = request.headers.get("authorization", "")
-            for token, info in TOKENS.items():
-                if hmac.compare_digest(supplied, f"Bearer {token}"):
-                    request.state.auth = info
-                    return await call_next(request)
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
 
+def build_app():
+    """组装完整 ASGI 应用(随机路径 + Bearer 中间件)。测试与 __main__ 共用同一条装配路径。"""
     app = mcp.http_app(path=f"/mcp-{PATH_TOKEN}")
     app.add_middleware(BearerAuthMiddleware)
-    uvicorn.run(app, host=HOST, port=PORT)
+    return app
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(build_app(), host=HOST, port=PORT)
