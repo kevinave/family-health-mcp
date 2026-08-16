@@ -36,14 +36,22 @@ without ever handing the model write access to the archive itself.
 
 ## 💡 Why
 
-A health archive is worth keeping in plain files — reports, medication lists, symptom notes, lab
-values — because plain files outlive every app you would otherwise store them in. But a plain-file
-archive is only useful if something can read it back to you when you need it, including when you
-are away from the machine that holds it.
+The archive already existed — plain Markdown, JSON and CSV on one machine, with a local coding
+agent doing the reading, cross-referencing and filing. That part worked well. The problem was
+everywhere else: at a clinic, on a phone, away from the machine that holds the files.
 
-A hosted assistant is good at that conversation. It is a poor choice for *owning* the archive: it
-has no memory across sessions, it will happily reorganise files you never asked it to touch, and
-general write access to medical records means one bad turn can quietly corrupt the record.
+The obvious answers all failed the same test. Remoting into the machine — SSH, a coding agent over
+a tunnel, a self-hosted chat UI — works technically, and I tried it. But **a tool you have to go
+out of your way to open is a tool you stop opening.** Health notes get written in the ten minutes
+after leaving a doctor's office, on a phone, or not at all.
+
+So the requirement inverted: rather than build a new place to talk to the archive, expose the
+archive **inside the chat app I already use every day**. MCP makes that a connector rather than a
+product.
+
+Which raises the real question — how much authority should a hosted model have over medical
+records? It has no memory across sessions, it will cheerfully reorganise files nobody asked it to
+touch, and one bad turn with general write access corrupts the record silently.
 
 Hence the split this project implements:
 
@@ -56,6 +64,11 @@ Hence the split this project implements:
 The remote end reads anything it is allowed to see, and deposits exactly one kind of thing — a
 structured report — into an inbox. Everything that changes the *shape* of the archive happens
 locally, on demand, under review.
+
+The server handles **text only**. Lab sheets and photos shared in the conversation are transcribed
+into the report in full — values, units, reference ranges — and the report flags which originals
+still need to be filed locally. Keeping binaries out of the transfer path removes a whole class of
+storage, format and permission problems, at the cost of one manual step.
 
 ---
 
