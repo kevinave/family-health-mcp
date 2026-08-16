@@ -36,24 +36,18 @@ without ever handing the model write access to the archive itself.
 
 ## 💡 Why
 
-The archive already existed — plain Markdown, JSON and CSV on one machine, with a local coding
-agent doing the reading, cross-referencing and filing. That part worked well. The problem was
-everywhere else: at a clinic, on a phone, away from the machine that holds the files.
+The archive and the local agent already worked, and I could already reach them from a phone —
+SSH in, talk to the CLI, done. Capability was never the problem.
 
-The obvious answers all failed the same test. Remoting into the machine — SSH, a coding agent over
-a tunnel, a self-hosted chat UI — works technically, and I tried it. But **a tool you have to go
-out of your way to open is a tool you stop opening.** Health notes get written in the ten minutes
-after leaving a doctor's office, on a phone, or not at all.
+The problem was that every conversation had to *start* with connecting. That small ritual is
+enough to make you skip it, and a health note you don't write in the ten minutes after leaving a
+clinic doesn't get written at all.
 
-So the requirement inverted: rather than build a new place to talk to the archive, expose the
-archive **inside the chat app I already use every day**. MCP makes that a connector rather than a
-product.
+So rather than build a better way to reach the archive, put the archive **inside the app that is
+already open**. MCP turns that into a connector instead of a product.
 
-Which raises the real question — how much authority should a hosted model have over medical
-records? It has no memory across sessions, it will cheerfully reorganise files nobody asked it to
-touch, and one bad turn with general write access corrupts the record silently.
-
-Hence the split this project implements:
+Which leaves one question worth answering carefully: how much authority should a hosted model have
+over medical records? Hence the split this project implements:
 
 <div align="center">
 
