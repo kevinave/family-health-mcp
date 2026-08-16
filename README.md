@@ -106,29 +106,32 @@ replaceable, because none of them owns the data.
 ```
 health-archive/
 │
-├── docs/                       shared rules and operating procedures
-│   └── rules.md                the single authority on how records are written
+├── docs/                        shared rules and operating procedures
+│   └── rules.md                 the single authority on how records are written
 │
 └── members/<name>/
     │
-    ├── 过敏与用药.md            allergies & medication   ← safety-critical, read first
-    ├── 病史.md                  history, entries tagged active / resolved / ruled-out
-    ├── 随访.md                  follow-ups, due dates and questions for the next visit
+    ├── allergies-medication.md  safety-critical — read before any advice
+    ├── history.md               entries tagged active / resolved / ruled-out
+    ├── follow-ups.md            due dates and questions for the next visit
     ├── index.md                 timeline — the index into everything below
     │
-    ├── 原件/YYYY/               ORIGINALS — scans, PDFs, photos.  never edited, never deleted
-    ├── 记录/YYYY/               narrative notes derived from those originals
-    ├── 自测/*.csv               self-measurement series (blood pressure, weight, …)
+    ├── originals/YYYY/          scans, PDFs, photos — never edited, never deleted
+    ├── notes/YYYY/              narrative notes derived from those originals
+    ├── measurements/*.csv       self-measurement series (blood pressure, weight, …)
     │
-    └── 收件箱/                  📥 INBOX — the only path this server can write to
-        └── 已归档/YYYY/            reports that have been reviewed and filed
+    └── inbox/                   📥 the only path this server can write to
+        └── filed/YYYY/          reports that have been reviewed and archived
 ```
+
+<sub>Filenames are shown here in English. The reference deployment runs a Chinese archive, so the
+literal names in `server.py` are the Chinese equivalents.</sub>
 
 Three rules keep it durable:
 
 | | |
 |:--|:--|
-| **1. Originals are the root** | Scans and reports in `原件/` are never modified or deleted. Everything else can be rebuilt from them. |
+| **1. Originals are the root** | Scans and reports in `originals/` are never modified or deleted. Everything else can be rebuilt from them. |
 | **2. Structure is derived** | The JSON and Markdown are a projection of the originals, not the source of truth — so a bad write is recoverable, not fatal. |
 | **3. The intelligent layer is swappable** | All behaviour lives in plain-Markdown procedures under `docs/`. Nothing about the archive assumes *which* model or client is reading it. |
 
@@ -168,7 +171,7 @@ sections" in an instruction the model may drift away from — a validation that 
 ```python
 missing = [s for s in REPORT_SECTIONS if s not in content]
 if missing:
-    raise ValueError(f"报告缺少必备章节: ...")
+    raise ValueError(...)          # -> "report is missing required sections: ..."
 ```
 
 <div align="center">
@@ -190,7 +193,7 @@ cannot escape:
 ```python
 p = (ARCHIVE / rel).resolve()
 if not p.is_relative_to(ARCHIVE):
-    raise ValueError("路径越出档案库范围")
+    raise ValueError(...)          # -> "path escapes the archive"
 ```
 
 Adding a family member: create the directory, add a token line, restart. Revoking: delete the
