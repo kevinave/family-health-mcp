@@ -1,15 +1,22 @@
-"""Family-health MCP 服务器 — 家庭成员采集端(ChatGPT 等经开发者模式应用接入)。
+"""Family-health MCP server — the collector side, for a hosted LLM client.
 
-职责分离(rules.md「收件箱」节):采集端只做两件事——读/搜档案以给出正确建议、
-把对话生成六章节结构化报告存进本人收件箱(save_report)。
-深度分析与结构化归档(记录/index/随访/病史/自测 CSV 等)由本地端独占,本服务器不提供相应工具。
+Separation of duties: the collector does two things — read and search the
+archive so advice is grounded, and deposit one structured six-section report
+per conversation into the member's inbox (save_report). Deep analysis and
+structured archiving (history, index, follow-ups, measurement series) belong
+to the local side, so this server deliberately has no tools for them.
 
-多成员隔离:tokens.json 把 Bearer 令牌绑定到成员(改动后需重启服务生效)。
-scope="self" 的令牌只能读写本人目录(members/<本人>/)与公共文件(docs/ 等);scope="all" 不受限。
-代码层铁律:路径锁在档案库内(resolve 后校验,防穿越);收件箱只新建不覆盖;
-报告六章节强校验;无删除、无重命名、无结构化档案写入;读类路径自动纠偏 <member>/→members/<member>/。
+Member isolation: tokens.json binds each bearer token to a member (restart to
+apply changes). A scope="self" token reaches its own directory
+(members/<name>/) and shared files (docs/ etc.); scope="all" is unrestricted.
 
-配置全部走环境变量,见 .env.example。
+Enforced in code, not requested in the prompt: paths are locked inside the
+archive (resolved first, then checked, so ../ cannot escape); the inbox is
+create-only; the six report sections are validated; no delete, no rename, no
+writes to the structured record; read paths get members/<member>/
+autocorrection.
+
+All configuration is environment variables — see .env.example.
 """
 
 import hmac
@@ -31,40 +38,44 @@ BASE = Path(__file__).resolve().parent
 def _require_env(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
-        sys.exit(f"[config] 缺少环境变量 {name}(见 .env.example)")
+        sys.exit(f"[config] missing environment variable {name} (see .env.example)")
     return value
 
 
 def _read_secret_file(path: Path, what: str) -> str:
     if not path.is_file():
-        sys.exit(f"[config] 找不到{what}: {path}(见 README 的 Setup 一节)")
+        sys.exit(f"[config] {what} not found: {path} (see the Setup section of the README)")
     content = path.read_text().strip()
     if not content:
-        sys.exit(f"[config] {what}为空: {path}")
+        sys.exit(f"[config] {what} is empty: {path}")
     return content
 
 
-# 档案库根目录:纯文件的健康档案,本服务器只在这个范围内活动
+# Root of the file-based health archive; the server never acts outside it.
 ARCHIVE = Path(_require_env("ARCHIVE_PATH")).expanduser().resolve()
 if not ARCHIVE.is_dir():
-    sys.exit(f"[config] ARCHIVE_PATH 不是目录: {ARCHIVE}")
+    sys.exit(f"[config] ARCHIVE_PATH is not a directory: {ARCHIVE}")
 
-# 随机长路径(第一层门禁)与令牌表(第二层门禁)
+# The long random path (gate one) and the token table (gate two).
 PATH_TOKEN = _read_secret_file(
     Path(os.environ.get("PATH_TOKEN_FILE", BASE / ".path_token")).expanduser(),
-    "路径令牌文件",
+    "path token file",
 )
 TOKENS = json.loads(
     _read_secret_file(
         Path(os.environ.get("TOKENS_FILE", BASE / "tokens.json")).expanduser(),
-        "令牌表",
+        "token table",
     )
 )  # token -> {member, scope}
 
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8787"))
-# scope="all" 的令牌未指明成员时落到谁
+# Which member a scope="all" token falls back to when it names no one.
 DEFAULT_MEMBER = os.environ.get("DEFAULT_MEMBER", "").strip()
+# Directory name of the single write path inside each member's folder. A
+# localized archive names it in its own language — the reference deployment
+# runs a Chinese archive and sets 收件箱.
+INBOX_DIRNAME = os.environ.get("INBOX_DIRNAME", "inbox").strip() or "inbox"
 
 MAX_READ_BYTES = 512 * 1024
 BINARY_EXT = {".jpg", ".jpeg", ".png", ".heic", ".gif", ".webp", ".pdf", ".tiff", ".bmp"}
@@ -72,48 +83,57 @@ BINARY_EXT = {".jpg", ".jpeg", ".png", ".heic", ".gif", ".webp", ".pdf", ".tiff"
 mcp = FastMCP(
     "family-health",
     instructions=(
-        "家庭健康档案库的采集端工具。①给健康建议前先 read_file 该成员的 过敏与用药.md 和 病史.md,"
-        "需要背景再看 index.md/记录/自测;②save_report 的调用时机:用户说'生成报告/存档/记录一下'时"
-        "无条件立即生成;对话告一段落且本轮出现新健康事实(新症状或变化/新检查结果/新图片或文件/"
-        "新用药或反应/新自测数值/医生意见/明确随访决定)时主动生成,不要问'需要吗';"
-        "纯解释、重复确认、无新增健康事实时不重复生成。报告格式与铁律见 save_report 工具说明。"
-        "深度分析与结构化归档不归你,由本地端定期处理。"
+        "Collector-side tools for a family health archive. "
+        "① Before giving health advice, read_file the member's "
+        "allergies-medication.md and history.md; pull index.md, notes/ and "
+        "measurements/ when more background is needed. "
+        "② When to save_report: the moment the user says 'save this / make a "
+        "report / put that on file', unconditionally and immediately; and "
+        "proactively when a conversation segment closes carrying new health "
+        "facts (a new or changed symptom, a new result, a new image or "
+        "document, a new medication or reaction, a new self-measured value, a "
+        "doctor's opinion, an explicit follow-up decision) — do not ask "
+        "'shall I'. Pure explanation, repeated confirmation, or chat with "
+        "nothing new does not need another report. Format and hard rules are "
+        "in save_report's description. Deep analysis and structured archiving "
+        "are not yours; the local side does them on its own schedule."
     ),
 )
 
 
 def _auth() -> dict:
-    """当前请求的身份(由中间件写入 request.state)。"""
+    """Identity of the current request (written by the middleware)."""
     req = get_http_request()
     auth = getattr(req.state, "auth", None)
     if not auth:
-        raise ValueError("未认证请求")
+        raise ValueError("unauthenticated request")
     return auth
 
 
 def _effective_member(member: str) -> str:
-    """校验调用者是否有权操作该成员;self 令牌未指明成员时自动落到本人。"""
+    """Check the caller may act for this member; a self token naming no one falls back to itself."""
     a = _auth()
     if a["scope"] == "all":
         resolved = member or DEFAULT_MEMBER
         if not resolved:
-            raise ValueError("未指定成员,且未配置 DEFAULT_MEMBER")
+            raise ValueError("no member given, and DEFAULT_MEMBER is not configured")
         return resolved
     if member and member != a["member"]:
-        raise ValueError(f"无权访问成员 {member} 的档案(你的令牌只绑定 {a['member']})")
+        raise ValueError(f"no access to member {member}'s files (your token is bound to {a['member']})")
     return a["member"]
 
 
 def _resolve(rel: str) -> Path:
     p = (ARCHIVE / rel).resolve()
     if not p.is_relative_to(ARCHIVE):
-        raise ValueError(f"路径越出档案库范围: {rel}")
+        raise ValueError(f"path escapes the archive: {rel}")
     return p
 
 
 def _user_path(rel: str) -> Path:
-    """解析读类工具的用户路径,并做权限校验。
-    自动纠偏:'<member>/随访.md' 这类漏写 members/ 前缀的路径,若 members/<rel> 存在则自动定位。"""
+    """Resolve a user-supplied read path and check the scope.
+    Autocorrection: for a path like '<member>/history.md' that forgot the
+    members/ prefix, use members/<rel> when that exists."""
     p = _resolve(rel)
     if not p.exists():
         alt = _resolve(f"members/{rel}")
@@ -124,73 +144,76 @@ def _user_path(rel: str) -> Path:
 
 
 def _check_read_scope(p: Path) -> None:
-    """self 令牌只能读本人目录和 members 之外的公共文件(docs/ 等)。
-    基于 resolve 后的真实路径校验,防 ../ 穿越绕过。"""
+    """A self token reads its own directory and the shared files outside
+    members/ (docs/ etc.). Checked on the *resolved* path, so ../ cannot
+    route around it."""
     a = _auth()
     if a["scope"] == "all":
         return
     parts = p.relative_to(ARCHIVE).parts
     if parts and parts[0] == "members":
         if len(parts) > 1 and parts[1] != a["member"]:
-            raise ValueError(f"无权访问其他成员的档案(你的令牌只绑定 {a['member']})")
+            raise ValueError(f"no access to another member's files (your token is bound to {a['member']})")
 
 
 def _member_dir(member: str) -> Path:
     d = _resolve(f"members/{member}")
     if not d.is_dir():
-        raise ValueError(f"成员不存在: {member}")
+        raise ValueError(f"member does not exist: {member}")
     return d
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
 def list_dir(path: str = ".") -> str:
-    """列出档案库内某目录的内容。path 为相对路径,默认库根目录。"""
+    """List a directory inside the archive. path is relative; default is the archive root."""
     p = _user_path(path)
     if not p.is_dir():
-        raise ValueError(f"不是目录: {path}(成员档案在 members/<名字>/ 下)")
+        raise ValueError(f"not a directory: {path} (member files live under members/<name>/)")
     lines = []
     for child in sorted(p.iterdir()):
         if child.name.startswith("."):
             continue
         mark = "/" if child.is_dir() else f"  ({child.stat().st_size} B)"
         lines.append(child.name + mark)
-    return "\n".join(lines) or "(空目录)"
+    return "\n".join(lines) or "(empty directory)"
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
 def read_file(path: str) -> str:
-    """读取档案库内一个文本文件。图片/PDF 原件只返回元数据。"""
+    """Read one text file inside the archive. Image/PDF originals return metadata only."""
     p = _user_path(path)
     if not p.is_file():
-        raise ValueError(f"文件不存在: {path}(成员档案在 members/<名字>/ 下)")
+        raise ValueError(f"no such file: {path} (member files live under members/<name>/)")
     if p.suffix.lower() in BINARY_EXT:
-        return f"[二进制原件,不支持远程读取] {path} — {p.stat().st_size} 字节。"
+        return f"[binary original, not readable remotely] {path} — {p.stat().st_size} bytes."
     if p.stat().st_size > MAX_READ_BYTES:
-        raise ValueError(f"文件超过 {MAX_READ_BYTES} 字节: {path}")
+        raise ValueError(f"file exceeds {MAX_READ_BYTES} bytes: {path}")
     return p.read_text()
 
 
 REPORT_SECTIONS = [
-    "## 主题概要",
-    "## 用户口述(原话)",
-    "## 文件与报告转录",
-    "## AI 建议要点",
-    "## 自测数值",
-    "## 待办与转交本地端",
+    "## Summary",
+    "## User's own words",
+    "## Transcribed documents",
+    "## Advice given",
+    "## Self-measured values",
+    "## Hand-over to the local side",
 ]
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
 def search(query: str, path: str = ".") -> str:
-    """在档案库的文本文件(.md/.json/.csv)中全文搜索关键词(不区分大小写),
-    返回 文件:行号:该行内容。适合找"上次腹痛""某项指标出现在哪"这类问题;
-    找到文件后用 read_file 读全文。path 可限定搜索范围(相对路径),默认全库。"""
+    """Full-text search (case-insensitive) across the archive's text files
+    (.md/.json/.csv), returning file:line:content. Made for questions like
+    "when did the stomach ache last come up" or "where does this value
+    appear"; read_file the hits for full context. path narrows the scope
+    (relative); default is the whole archive."""
     q = query.strip().lower()
     if not q:
-        raise ValueError("query 不能为空")
+        raise ValueError("query must not be empty")
     root = _user_path(path)
     if not root.exists():
-        raise ValueError(f"路径不存在: {path}(成员档案在 members/<名字>/ 下)")
+        raise ValueError(f"no such path: {path} (member files live under members/<name>/)")
     hits, scanned = [], 0
     files = [root] if root.is_file() else sorted(root.rglob("*"))
     for f in files:
@@ -207,75 +230,75 @@ def search(query: str, path: str = ".") -> str:
                 if q in line.lower():
                     hits.append(f"{rel_f}:{i}: {line.strip()[:200]}")
                     if len(hits) >= 50:
-                        return "\n".join(hits) + "\n(已达 50 条上限,建议缩小范围或换更具体的词)"
+                        return "\n".join(hits) + "\n(50-match cap reached — narrow the path or use a more specific query)"
         except (UnicodeDecodeError, OSError):
             continue
     if not hits:
-        return f"未找到「{query}」(扫描了 {scanned} 个文本文件)"
+        return f'No hits for "{query}" (scanned {scanned} text files)'
     return "\n".join(hits)
 
 
 @mcp.tool
 def save_report(date: str, topic: str, content: str, member: str = "") -> str:
-    """在对话告一段落、且本轮出现新健康事实时,生成本次交流的结构化报告并存入本人收件箱,供本地医生端定期消化入库(纯解释/无新增事实不重复生成)。
+    """When a conversation segment closes carrying new health facts, write the structured report of this exchange into the member's own inbox, for the local side to file during its periodic review (pure explanation with nothing new does not need a report).
 
-    - date: 今天的日期 YYYY-MM-DD
-    - topic: 简短中文主题,如 "左腹隐痛咨询"、"体检报告讨论"
-    - member: 一般留空(自动落到令牌绑定的成员)
-    - content: 报告正文,**必须包含以下六个二级标题章节,缺一不可**(无内容的章节写"(无)"):
+    - date: today's date, YYYY-MM-DD
+    - topic: a short topic, e.g. "left-side abdominal pain", "lab results discussion"
+    - member: normally left empty (falls back to the member bound to the token)
+    - content: the report body, which **must contain all six of these second-level headings** (write "(none)" under any that are empty):
 
-      ## 主题概要
-      (一段话说清本次聊了什么、结论是什么)
-      ## 用户口述(原话)
-      (逐条保留用户原话,不改写、不省略;时间、部位、程度等细节原样保留)
-      ## 文件与报告转录
-      (用户在对话里给出的文件/报告/图片的完整文字转录,数值、参考范围、单位一个不落;无则写(无))
-      ## AI 建议要点
-      (本次给出的关键建议与就医触发条件)
-      ## 自测数值
-      (本次提到的血压/血糖/体重等,一行一条,含日期时间;无则写(无))
-      ## 待办与转交本地端
-      (复查提醒、需把原件交本地端入库的文件、需本地端跟进的事项)
+      ## Summary
+      (one paragraph: what was discussed, and what was concluded)
+      ## User's own words
+      (verbatim quotes, one per line, in the user's original language — no paraphrase, no omission; times, locations, intensities kept exactly)
+      ## Transcribed documents
+      (full transcription of any file/report/image shown in the conversation — every value, unit and reference range; "(none)" if nothing was shown)
+      ## Advice given
+      (the key advice from this exchange, and the thresholds that should trigger a doctor's visit)
+      ## Self-measured values
+      (blood pressure / glucose / weight etc. mentioned this time, one per line, each with date and time; "(none)" if none)
+      ## Hand-over to the local side
+      (follow-up reminders, originals the user must drop into the archive, anything the local side should pick up)
 
-    写报告的铁律:
-    - 用户原话逐条保留,不改写、不省略;时间、部位、程度等细节原样保留
-    - 文件和图片内容完整转录,数值、单位、参考范围一个不落
-    - 自测数值每条带日期和时间
-    - 本工具只收文字。用户在对话里发的图片/PDF 要完整转录进"文件与报告转录",
-      并在"待办与转交本地端"提醒把原件交给本地端归档(原件由用户自行放入档案库)
-    - 宁全勿简——这份报告是档案入库的唯一来源,你漏掉的信息就永远丢了
-    - 存完在回复末尾用一行说明存了什么
+    Hard rules:
+    - The user's words are kept verbatim in their original language — never paraphrased, never trimmed; times, locations and intensities stay exactly as said.
+    - Documents and images are transcribed completely: values, units, reference ranges, every one of them.
+    - Every self-measured value carries its date and time.
+    - This tool takes text only. Images and PDFs shown in the conversation are transcribed in full into "Transcribed documents", and "Hand-over to the local side" reminds the user to drop the originals into the archive themselves (the originals are filed by the user, not by this tool).
+    - Too much beats too little — this report is the archive's only source for this conversation; whatever it misses is lost.
+    - End the reply with one line saying what was saved.
 
-    只新建不覆盖;同日同主题自动加序号。"""
+    Create-only, never overwrites; a same-day, same-topic report gets a numeric suffix."""
     m = _effective_member(member)
     _member_dir(m)
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
-        raise ValueError("date 必须是 YYYY-MM-DD")
+        raise ValueError("date must be YYYY-MM-DD")
     try:
         _date.fromisoformat(date)
     except ValueError:
-        raise ValueError(f"date 不是真实存在的日期: {date}")
+        raise ValueError(f"date is not a real calendar date: {date}")
     missing = [s for s in REPORT_SECTIONS if s not in content]
     if missing:
-        raise ValueError(f"报告缺少必备章节: {'、'.join(missing)}。无内容的章节也要保留标题并写(无)")
-    # 清洗 topic:斜杠改连字符,所有空白(含换行,防 front matter 注入)折叠成下划线
+        raise ValueError(f"report is missing required sections: {', '.join(missing)}. Keep every heading; write (none) under the empty ones")
+    # Sanitize the topic: slashes become hyphens; all whitespace (newlines
+    # included, to keep front matter uninjectable) collapses to underscores.
     topic = re.sub(r"[/\\]", "-", topic)
-    topic = re.sub(r"\s+", "_", topic.strip()) or "对话"
-    rel = f"members/{m}/收件箱/{date}_{topic}.md"
+    topic = re.sub(r"\s+", "_", topic.strip()) or "conversation"
+    rel = f"members/{m}/{INBOX_DIRNAME}/{date}_{topic}.md"
     p = _resolve(rel)
     n = 2
     while p.exists():
-        rel = f"members/{m}/收件箱/{date}_{topic}-{n}.md"
+        rel = f"members/{m}/{INBOX_DIRNAME}/{date}_{topic}-{n}.md"
         p = _resolve(rel)
         n += 1
     p.parent.mkdir(parents=True, exist_ok=True)
-    front = f"---\nmember: {m}\ndate: {date}\ntopic: {topic}\ntype: 对话报告\n---\n\n"
+    front = f"---\nmember: {m}\ndate: {date}\ntopic: {topic}\ntype: conversation-report\n---\n\n"
     p.write_text(front + content)
-    return f"已存入 {rel},本地医生端会在定期整理时消化。"
+    return f"Saved to {rel}; the local side files it during its periodic review."
 
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
-    """第二层门禁:静态 Bearer 令牌,常量时间比较,把身份写进 request.state。"""
+    """Gate two: static bearer tokens, constant-time comparison, identity written onto request.state."""
 
     async def dispatch(self, request, call_next):
         supplied = request.headers.get("authorization", "")
@@ -287,7 +310,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
 
 def build_app():
-    """组装完整 ASGI 应用(随机路径 + Bearer 中间件)。测试与 __main__ 共用同一条装配路径。"""
+    """Assemble the full ASGI app (random path + bearer middleware). Tests and __main__ share this assembly path."""
     app = mcp.http_app(path=f"/mcp-{PATH_TOKEN}")
     app.add_middleware(BearerAuthMiddleware)
     return app

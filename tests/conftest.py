@@ -26,14 +26,14 @@ ADMIN_TOKEN = "admin-all-token"
 def _build_archive(root: Path) -> None:
     alice = root / "members" / "alice"
     bob = root / "members" / "bob"
-    (alice / "收件箱").mkdir(parents=True)
-    (bob / "收件箱").mkdir(parents=True)
+    (alice / "inbox").mkdir(parents=True)
+    (bob / "inbox").mkdir(parents=True)
     (root / "docs").mkdir()
 
-    (root / "docs" / "rules.md").write_text("# 公共规则\n所有成员可读。\n")
-    (alice / "病史.md").write_text("# 病史\n2026-01-02 腹痛就诊,已缓解。\n")
-    (alice / "过敏与用药.md").write_text("# 过敏与用药\n青霉素过敏。\n")
-    (bob / "病史.md").write_text("# 病史\nBOB-PRIVATE-MARKER 高血压随访中。\n")
+    (root / "docs" / "rules.md").write_text("# Shared rules\nReadable by every member.\n")
+    (alice / "history.md").write_text("# History\n2026-01-02 stomach ache, seen at the clinic, resolved.\n")
+    (alice / "allergies-medication.md").write_text("# Allergies & medication\nAllergic to penicillin.\n")
+    (bob / "history.md").write_text("# History\nBOB-PRIVATE-MARKER hypertension, under follow-up.\n")
     (alice / "scan.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
     (alice / "huge.md").write_text("x" * (512 * 1024 + 1))
 
