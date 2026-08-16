@@ -97,6 +97,46 @@ flowchart TB
 
 ---
 
+## 📁 The archive
+
+The whole system rests on one design choice: **the archive is a directory, not a database.**
+Every layer above it — this server, the local agent, whatever replaces them in five years — is
+replaceable, because none of them owns the data.
+
+```
+health-archive/
+│
+├── docs/                       shared rules and operating procedures
+│   └── rules.md                the single authority on how records are written
+│
+└── members/<name>/
+    │
+    ├── 过敏与用药.md            allergies & medication   ← safety-critical, read first
+    ├── 病史.md                  history, entries tagged active / resolved / ruled-out
+    ├── 随访.md                  follow-ups, due dates and questions for the next visit
+    ├── index.md                 timeline — the index into everything below
+    │
+    ├── 原件/YYYY/               ORIGINALS — scans, PDFs, photos.  never edited, never deleted
+    ├── 记录/YYYY/               narrative notes derived from those originals
+    ├── 自测/*.csv               self-measurement series (blood pressure, weight, …)
+    │
+    └── 收件箱/                  📥 INBOX — the only path this server can write to
+        └── 已归档/YYYY/            reports that have been reviewed and filed
+```
+
+Three rules keep it durable:
+
+| | |
+|:--|:--|
+| **1. Originals are the root** | Scans and reports in `原件/` are never modified or deleted. Everything else can be rebuilt from them. |
+| **2. Structure is derived** | The JSON and Markdown are a projection of the originals, not the source of truth — so a bad write is recoverable, not fatal. |
+| **3. The intelligent layer is swappable** | All behaviour lives in plain-Markdown procedures under `docs/`. Nothing about the archive assumes *which* model or client is reading it. |
+
+Naming is by **report date**, not filing date (`YYYY-MM-DD_topic`), so the timeline stays true
+even when a document is filed months late.
+
+---
+
 ## 🧰 The tool surface
 
 The tool surface **is** the security boundary, so it is kept deliberately small.
@@ -237,27 +277,6 @@ connector:
 | Token | from `tokens.json` |
 
 `deploy/` has example launchd and cloudflared configuration for running both as always-on services.
-
-</details>
-
-<details>
-<summary><b>Archive layout</b></summary>
-
-<br/>
-
-```
-health-archive/
-├── docs/                    shared rules and procedures
-└── members/<name>/
-    ├── 过敏与用药.md          allergies and medication   ← read first
-    ├── 病史.md                history
-    ├── 随访.md                follow-ups
-    ├── index.md               timeline
-    ├── 记录/                  narrative notes
-    ├── 自测/                  self-measurement series (CSV)
-    ├── 原件/                  original scans and reports
-    └── 收件箱/                inbox   ← the only path this server writes to
-```
 
 </details>
 
