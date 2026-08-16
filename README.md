@@ -170,6 +170,25 @@ literal names in `server.py` are the Chinese equivalents.</sub>
 </details>
 
 <details>
+<summary><b>What is in the repository</b></summary>
+
+<br/>
+
+| Piece | Role |
+|:--|:--|
+| `server.py` | the whole server — four tools, scope checks, bearer middleware |
+| `tests/` | the security model, pinned end-to-end: the three gates, scope isolation, the report contract |
+| `prompts/` | the role prompt pasted into the client — the server decides what the model **can** do, this file says what it **should** do |
+| `deploy/` | example launchd and Cloudflare Tunnel configuration for the always-on setup |
+| `.env.example` · `tokens.example.json` | configuration templates — nothing secret is committed |
+
+The prompt file is part of the system on purpose: authority lives in code, behaviour lives in the
+prompt, and keeping the prompt in the repo is what keeps the two in sync when a tool contract
+changes.
+
+</details>
+
+<details>
 <summary><b>Setup</b></summary>
 
 <br/>
@@ -202,6 +221,9 @@ before `save_report` will accept anything for them.
 Expose `127.0.0.1:8787` through a tunnel and add the URL as a developer-mode MCP connector:
 `https://<your-host>/mcp-<path_token>`, auth = access token, scheme = bearer.
 `deploy/` has example launchd and cloudflared configuration.
+
+Finally, paste [`prompts/chatgpt-project-instructions.md`](prompts/chatgpt-project-instructions.md)
+into the client's project instructions — that is the behavioural half of the system.
 
 </details>
 
