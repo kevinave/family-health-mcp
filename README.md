@@ -12,6 +12,7 @@ without ever handing the model write access to the archive itself.
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/protocol-MCP-6E56CF)](https://modelcontextprotocol.io/)
 [![FastMCP](https://img.shields.io/badge/FastMCP-3.4.2-0A7EA4)](https://github.com/jlowin/fastmcp)
+[![CI](https://github.com/kevinave/family-health-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/kevinave/family-health-mcp/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![Status](https://img.shields.io/badge/status-running%20since%20Jul%202026-success)
 
@@ -98,6 +99,10 @@ if missing:
 The section that carries the most weight asks for the user's own words, verbatim — because the
 paraphrase is where detail silently disappears.
 
+Every rule in this section is pinned by [`tests/`](tests/): the suite starts the real HTTP server
+over a throwaway archive and attacks it through the same three gates a client passes — wrong path,
+wrong token, `../` traversal, another member's files, a report with a section missing.
+
 > [!TIP]
 > The remote model once proposed five additional tools for itself. All five were declined: each one
 > moved a decision from the reviewed local side to the unreviewed remote side.
@@ -181,6 +186,13 @@ python3 -c "import secrets; print(secrets.token_hex(24))" > .path_token
 
 set -a; source .env; set +a
 python3 server.py
+```
+
+To run the test suite (no archive or tokens needed — it builds its own):
+
+```bash
+pip install -r requirements-dev.txt
+pytest
 ```
 
 Generate one token per person with `secrets.token_hex(24)` and add it to `tokens.json` as
