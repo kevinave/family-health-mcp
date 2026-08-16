@@ -13,7 +13,7 @@ without ever handing the model write access to the archive itself.
 [![MCP](https://img.shields.io/badge/protocol-MCP-6E56CF)](https://modelcontextprotocol.io/)
 [![FastMCP](https://img.shields.io/badge/FastMCP-3.4.2-0A7EA4)](https://github.com/jlowin/fastmcp)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Status](https://img.shields.io/badge/status-running%20since%20Jul%202026-success)](#)
+![Status](https://img.shields.io/badge/status-running%20since%20Jul%202026-success)
 
 </div>
 
