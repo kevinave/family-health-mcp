@@ -22,7 +22,8 @@ without ever handing the model write access to the archive itself.
 
 ## Why
 
-The archive and a local agent already worked well together. The problem was everywhere else — at a
+My family's health records live in plain files on one machine — an archive that a local agent and
+I curate together, and that part already worked well. The problem was everywhere else — at a
 clinic, on a phone, away from the machine holding the files. I could already reach it by SSH, so
 capability was never the issue; the issue was that every conversation had to *start* with
 connecting, and that small ritual is enough to make you skip it.
@@ -96,8 +97,10 @@ if missing:
     raise ValueError(...)          # -> "report is missing required sections: ..."
 ```
 
-The section that carries the most weight asks for the user's own words, verbatim — because the
-paraphrase is where detail silently disappears.
+The six sections: what was discussed, the user's own words, transcriptions of any documents shown,
+the advice given, self-measured values, and hand-over items for the local side. The one that
+carries the most weight is the verbatim one — because the paraphrase is where detail silently
+disappears.
 
 Every rule in this section is pinned by [`tests/`](tests/): the suite starts the real HTTP server
 over a throwaway archive and attacks it through the same three gates a client passes — wrong path,
@@ -207,13 +210,6 @@ set -a; source .env; set +a
 python3 server.py
 ```
 
-To run the test suite (no archive or tokens needed — it builds its own):
-
-```bash
-pip install -r requirements-dev.txt
-pytest
-```
-
 Generate one token per person with `secrets.token_hex(24)` and add it to `tokens.json` as
 `"<token>": {"member": "alice", "scope": "self"}`. Each member needs `members/<name>/` to exist
 before `save_report` will accept anything for them.
@@ -224,6 +220,12 @@ Expose `127.0.0.1:8787` through a tunnel and add the URL as a developer-mode MCP
 
 Finally, paste [`prompts/chatgpt-project-instructions.md`](prompts/chatgpt-project-instructions.md)
 into the client's project instructions — that is the behavioural half of the system.
+
+The test suite needs none of the above — no archive, no tokens, it builds its own:
+
+```bash
+pip install -r requirements-dev.txt && pytest
+```
 
 </details>
 
